@@ -1,0 +1,306 @@
+***************期中考: 認識住院醫療費用清單明細檔且找出性心肌梗塞病患;
+*住院主診斷為急性心肌梗塞(ICD-9: 410)病患之基本人口特質、醫院、以及醫師特質
+**先確定資料路徑;
+LIBNAME dd 'C:\Users\user\Downloads\dd';
+LIBNAME hosb 'C:\Users\user\Downloads';
+
+*Step1: 將2001至2009年分資料進行垂直合併 (SET));
+DATA ddused;
+    SET dd.dd2001 - dd.dd2009;
+RUN;
+*資料集 WORK.DDused 有86437 個觀測值和 70 個變數;
+
+
+*把9年資料算人數;
+*人數與人次的差異 (nodupkey);
+PROC SORT DATA=ddused OUT=ddused_id NODUPKEY;
+BY ID;
+RUN;
+*資料集 WORK.DDused_ID 有 35157 個觀測值;
+
+*step2同一次住院歸戶，歸戶建值;
+DATA ddGH;
+    SET ddused_id;
+	key=ID||HOSP_ID||IN_DATE;*做垂直累加;
+RUN;
+PROC SORT DATA= ddGH;
+BY IN_DATE;
+RUN;
+
+PROC SORT DATA=ddGH;
+BY KEY;
+RUN;
+DATA ddGH_retain(KEEP =FEE_YM APPL_TYPE  HOSP_ID APPL_DATE  CASE_TYPE  SEQ_NO ID ID_BIRTHDAY ID_SEX  IN_DATE OUT_DATE  total_fee  E_BED_DAY_s S_BED_DAY_s  PRSN_ID KEY);
+SET ddGH;
+BY KEY;
+RETAIN  E_BED_DAY_s 0 S_BED_DAY_s 0 total_fee 0 ;
+IF FIRST.KEY THEN DO;
+E_BED_DAY_s=0;
+S_BED_DAY_s=0; 
+total_fee=0;
+END;
+E_BED_DAY_s=E_BED_DAY_s+E_BED_DAY;
+S_BED_DAY_s=S_BED_DAY_s+S_BED_DAY; 
+total_fee=total_fee+MED_AMT;	
+IF LAST.KEY;
+RUN;
+
+
+*Step3: 找急性心肌梗塞(就醫主診斷碼符合ICD-9: 410);
+
+DATA heart;
+     SET ddGH_retain;
+     IF substr(ICD9CM_CODE,1,3)='410';
+RUN;
+*人數N= 300;
+
+*Step4: 急性心肌梗塞就醫人次就醫人數之差異;
+PROC SORT DATA=heart OUT=heart_id NODUPKEY
+BY ID;
+RUN;
+*人數N= 254;
+
+
+*去頭 (2000年之前入院);
+DATA heart_id1 ;
+SET heart_id ;
+IF substr(IN_DATE,1,4)<2000 THEN DELETE;
+RUN;
+*去尾;
+DATA heart_id2;
+SET heart_id1;
+IF substr(OUT_DATE,1,4)=' ' THEN DELETE;
+RUN;
+*人數N= 252;
+
+*留初次就醫的病患;
+PROC SORT DATA=heart_id2;
+BY ID IN_DATE;
+RUN;
+PROC SORT DATA=heart_id2  NODUPKEY OUT=heart_id3;
+BY ID;
+RUN;
+*人數N= 252;
+
+*DD檔及HOSB檔串聯;
+libname hosb 'C:\Users\user\Downloads';
+
+DATA hosb;
+SET hosb.hosb2000;
+RUN;
+
+
+PROC SORT DATA=heart_id3;
+BY HOSP_ID;
+PROC SORT DATA=hosb;
+BY HOSP_ID;
+RUN;
+DATA merge_data;
+MERGE  heart_id3 (IN=a)hosb(IN=b);
+BY HOSP_ID;
+IF a;
+RUN;
+*人數N= 252;
+
+
+*性別; 
+PROC FREQ DATA=merge_data;
+table id_sex;
+RUN;
+
+*男生數;
+DATA heart_m;
+SET merge_data;;
+IF id_sex = 'M';
+RUN; 
+
+*女生數;
+DATA heart_f;
+SET merge_data;
+IF id_sex = 'F';
+RUN; 
+
+
+*年齡 男;
+DATA heart_m_age;
+SET heart_m;
+age1=substr(in_date,1,4)-substr(id_birthday,1,4);
+RUN;
+PROC MEANS DATA= heart_m_age;
+VAR age1;
+RUN;
+
+*年齡 女;
+DATA heart_f_age;
+SET heart_f;
+age1=substr(in_date,1,4)-substr(id_birthday,1,4);
+RUN;
+PROC MEANS DATA= heart_f_age;
+VAR age1;
+RUN;
+
+
+*平均住院日 男;
+DATA heart_m_day;
+SET heart_m;
+day= OUT_DATE-IN_DATE;
+RUN;
+PROC MEANS DATA=heart_m_day;
+VAR day;
+RUN;
+
+*平均住院日 女;
+DATA heart_f_day;
+SET heart_f;
+day= OUT_DATE-IN_DATE;
+RUN;
+PROC MEANS DATA=heart_f_day;
+VAR day;
+RUN;
+
+*平均費用 男;
+PROC MEANS DATA=heart_m;
+VAR MED_AMT;
+RUN;
+
+*平均費用 女;
+PROC MEANS DATA=heart_f;
+VAR MED_AMT;
+RUN;
+
+
+*診斷年 男;
+DATA heart_m_year;
+SET heart_m;
+IF 2001<=substr(IN_DATE ,1,4)<=2003 THEN year=1;
+IF 2004<=substr(IN_DATE ,1,4)<=2006 THEN year=2;
+IF 2007<=substr(IN_DATE ,1,4)<=2009 THEN year=3;
+RUN;
+PROC FREQ DATA=heart_m_year;
+TABLES year;
+RUN;
+
+*診斷年 女;
+DATA heart_f_year;
+SET heart_f;
+IF 2001<=substr(IN_DATE ,1,4)<=2003 THEN year=1;
+IF 2004<=substr(IN_DATE ,1,4)<=2006 THEN year=2;
+IF 2007<=substr(IN_DATE ,1,4)<=2009 THEN year=3;
+RUN;
+PROC FREQ DATA=heart_f_year;
+TABLES year;
+RUN;
+
+*就醫地點 男;
+DATA heart_m_location;
+SET heart_m;
+IF HOSP_CONT_TYPE=1 THEN type=1;
+IF HOSP_CONT_TYPE=2 THEN type=2;
+IF HOSP_CONT_TYPE=3 THEN type=3;
+RUN;
+PROC FREQ DATA=heart_m_location;
+TABLES type;
+RUN;
+
+*就醫地點 女;
+DATA heart_f_location;
+SET heart_f;
+IF HOSP_CONT_TYPE=1 THEN type=1;
+IF HOSP_CONT_TYPE=2 THEN type=2;
+IF HOSP_CONT_TYPE=3 THEN type=3;
+RUN;
+PROC FREQ DATA=heart_f_location;
+TABLES type;
+RUN;
+
+*醫院服務量 男;
+DATA heart_m_hosb;
+SET heart_m;
+BY HOSP_ID;
+RETAIN HOSP_SER 0;
+IF FIRST.HOSP_ID THEN DO;
+HOSP_SER=0;
+END;
+HOSP_SER=HOSP_SER+1;	
+IF LAST.HOSP_ID;
+RUN;
+DATA heart_m_hosb;
+SET heart_m_hosb;
+IF 1<=HOSP_SER<=9  THEN HOSP_SERVICE=1;
+IF 10<=HOSP_SER<=49  THEN HOSP_SERVICE=2;
+IF 50<=HOSP_SER THEN HOSP_SERVICE=3;
+RUN;
+PROC FREQ DATA=heart_m_hosb;
+TABLES HOSP_SERVICE;
+RUN;
+
+*醫院服務量 女;
+DATA heart_f_hosb;
+SET heart_f;
+BY HOSP_ID;
+RETAIN HOSP_SER 0;
+IF FIRST.HOSP_ID THEN DO;
+HOSP_SER=0;
+END;
+HOSP_SER=HOSP_SER+1;	
+IF LAST.HOSP_ID;
+RUN;
+DATA heart_f_hosb;
+SET heart_f_hosb;
+IF 1<=HOSP_SER<=9  THEN HOSP_SERVICE=1;
+IF 10<=HOSP_SER<=49  THEN HOSP_SERVICE=2;
+IF 50<=HOSP_SER THEN HOSP_SERVICE=3;
+RUN;
+PROC FREQ DATA=heart_f_hosb;
+TABLES HOSP_SERVICE;
+RUN;
+
+*醫師服務量 男;
+PROC SORT DATA=heart_m;
+BY PRSN_ID;
+RUN;
+DATA heart_m_doc;
+SET heart_m;
+BY PRSN_ID;
+RETAIN DOCT_SER 0;
+IF FIRST.PRSN_ID THEN DO;
+DOCT_SER=0;
+END;
+DOCT_SER=DOCT_SER+1;	
+IF LAST.PRSN_ID;
+RUN;
+
+DATA heart_m_doc;
+SET heart_m;
+IF 1<=DOCT_SER<=4  THEN DOCT_SERVICE=1;
+IF 5<=DOCT_SER<=9  THEN DOCT_SERVICE=2;
+IF 10<=DOCT_SER THEN DOCT_SERVICE=3;
+RUN;
+PROC FREQ DATA=heart_m_doc;
+TABLES DOCT_SERVICE;
+RUN;
+
+*醫師服務量 女;
+PROC SORT DATA=heart_f;
+BY PRSN_ID;
+RUN;
+DATA heart_f_doc;
+SET heart_f;
+BY PRSN_ID;
+RETAIN DOCT_SER 0;
+IF FIRST.PRSN_ID THEN DO;
+DOCT_SER=0;
+END;
+DOCT_SER=DOCT_SER+1;	
+IF LAST.PRSN_ID;
+RUN;
+
+DATA heart_f_doc;
+SET heart_f;
+IF 1<=DOCT_SER<=4  THEN DOCT_SERVICE=1;
+IF 5<=DOCT_SER<=9  THEN DOCT_SERVICE=2;
+IF 10<=DOCT_SER THEN DOCT_SERVICE=3;
+RUN;
+PROC FREQ DATA=heart_f_doc;
+TABLES DOCT_SERVICE;
+RUN;
